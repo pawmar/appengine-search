@@ -103,37 +103,37 @@ class TestLoremIpsum:
         pass
 
     def test_only_index(self):
-        returned_pages = NoninflectedPage.search('John')  # Only 'content' is indexed.
+        returned_pages, cursor = NoninflectedPage.search('John')  # Only 'content' is indexed.
         assert not returned_pages
-        returned_pages = NoninflectedPage.search('lorem ipsum')
+        returned_pages, cursor = NoninflectedPage.search('lorem ipsum')
         assert returned_pages
 
     def test_two_word_search(self):
-        returned_pages = NoninflectedPage.search('LoReM IpSuM')
+        returned_pages, cursor = NoninflectedPage.search('LoReM IpSuM')
         assert returned_pages and len(returned_pages) == 1
         lmatch = re.search(r'lorem', returned_pages[0].content, re.IGNORECASE)
         imatch = re.search(r'ipsum', returned_pages[0].content, re.IGNORECASE)
         assert lmatch and imatch
 
     def test_key_only_search(self):
-        key_list = NoninflectedPage.search('LoReM ipsum', keys_only=True)
+        key_list, cursor = NoninflectedPage.search('LoReM ipsum', keys_only=True)
         assert isinstance(key_list, list) and len(key_list) == 1
         assert isinstance(key_list[0][0], db.Key)
         assert isinstance(key_list[0][1], basestring)
 
     def test_search_miss(self):
-        returned_pages = NoninflectedPage.search('NowhereInDoc')
+        returned_pages, cursor = NoninflectedPage.search('NowhereInDoc')
         assert not returned_pages
-        returned_pages = NoninflectedPage.search('director')
+        returned_pages, cursor = NoninflectedPage.search('director')
         assert returned_pages
         lmatch = re.search(r'lorem', returned_pages[0].content, re.IGNORECASE)
         imatch = re.search(r'ipsum', returned_pages[0].content, re.IGNORECASE)
         assert not lmatch and not imatch
 
     def test_not_inflected(self):
-        returned_pages = NoninflectedPage.search('encrust')
+        returned_pages, cursor = NoninflectedPage.search('encrust')
         assert not returned_pages
-        returned_pages = NoninflectedPage.search('encrusted')
+        returned_pages, cursor = NoninflectedPage.search('encrusted')
         assert returned_pages
 
 class TestInflection:
@@ -150,7 +150,7 @@ class TestInflection:
 
     def test_inflections(self):
         def check_inflection(word1, word2):
-            returned_pages = Page.search(word1)
+            returned_pages, cursor = Page.search(word1)
             assert returned_pages
             assert re.search(word2, returned_pages[0].content, re.IGNORECASE)
         check_inflection('algorithm', 'algorithms')
@@ -202,26 +202,26 @@ class TestKeyOnlySearch:
         assert search.StemmedIndex.all().count() == 3
 
     def test_default_titling(self):
-        page_list = Page.search('no title', keys_only=True)
+        page_list, cursor = Page.search('no title', keys_only=True)
         assert len(page_list) == 1
         assert page_list[0][0].name() == 'test1'
         assert page_list[0][1] == 'Page test1'  # Default titling
 
     def test_title_from_parent(self):
-        page_list = Page.search('last', keys_only=True)
+        page_list, cursor = Page.search('last', keys_only=True)
         assert len(page_list) == 1
         assert page_list[0][0].name() == 'test3'
         assert page_list[0][1] == 'Third Post'
 
     def test_title_change(self):
-        pages = Page.search('second post')
+        pages, cursor = Page.search('second post')
         assert len(pages) == 1
         page = pages[0]
         page.title = 'My Great New Title'
         old_key = page.put()
         page.indexed_title_changed()
         assert search.StemmedIndex.all().count() == 3
-        page_list = Page.search('second post', keys_only=True)
+        page_list, cursor = Page.search('second post', keys_only=True)
         assert len(page_list) == 1
         assert page_list[0][1] == 'My Great New Title'
         assert page_list[0][0].id_or_name() == old_key.id_or_name()
@@ -254,24 +254,40 @@ class TestMultiWordSearch:
         assert search.StemmedIndex.all().count() == 3
 
     def test_multiword_search_order(self):
-        returned_pages = Page.search('statue of liberty')
+        returned_pages, cursor = Page.search('statue of liberty')
         assert len(returned_pages) == 2
         print "Returned pages: %s" % [page.key().name() for page in returned_pages]
         assert returned_pages[0].key().name() == u'statuetext'
         assert returned_pages[1].key().name() == u'statuetext2'
 
     def test_multiword_search_fail(self):
-        returned_pages = Page.search('statue of liberty biggy word')
+        returned_pages, cursor = Page.search('statue of liberty biggy word')
         assert not returned_pages
         
     def test_multiword_search_and(self):
-        returned_pages = Page.search('statue of liberty python')
+        returned_pages, cursor = Page.search('statue of liberty python')
         assert len(returned_pages) == 1
         assert returned_pages[0].key().name() == u'statuetext'
 
     def test_two_word_search(self):
-        returned_pages = Page.search('ornately narrated')
+        returned_pages, cursor = Page.search('ornately narrated')
         assert len(returned_pages) == 1
         assert returned_pages[0].key().name() == u'doetext'
 
-     
+
+class TestCursor:
+    def setup(self):
+        clear_datastore()
+        content1 = 'Bread cumbs are delicious!'
+        content2 = 'Bread cumbs are abomination!'
+        pages = [NoninflectedPage(author='John Doe', title='Yummy', content=content1) for i in range(15)]
+        pages.extend([NoninflectedPage(author='John Noes', title='Yikes', content=content2) for i in range(10)])
+        db.put(pages)
+        for page in pages:
+            page.index()
+        assert search.LiteralIndex.all().count() == 25
+    def test_cursor(self):
+        returned_pages, cursor = NoninflectedPage.search('delicious', limit=10)
+        assert len(returned_pages) == 10
+        returned_pages, cursor = NoninflectedPage.search('delicious', limit=10, cursor=cursor)
+        assert len(returned_pages) == 5

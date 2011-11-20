@@ -257,16 +257,20 @@ class Searchable(object):
     def full_text_search(phrase, limit=10, 
                          kind=None, 
                          stemming=INDEX_STEMMING,
-                         multi_word_literal=INDEX_MULTI_WORD):
+                         multi_word_literal=INDEX_MULTI_WORD,
+                         cursor=None):
         """Queries search indices for phrases using a merge-join.
         
         Args:
             phrase: String.  Search phrase.
             kind: String.  Returned keys/entities are restricted to this kind.
+            cursor: cursor for search queries
 
         Returns:
-            A list of (key, title) tuples corresponding to the indexed entities.  
-            Multi-word literal matches are returned first.
+            - A list of (key, title) tuples corresponding to the indexed entities.  
+                Multi-word literal matches are returned first.
+            - cursor for next query
+
 
         TODO -- Should provide feedback if input search phrase has stop words, etc.
         """
@@ -277,7 +281,8 @@ class Searchable(object):
             klass = StemmedIndex
         else:
             klass = LiteralIndex
-
+        
+        new_cursor = None
         if len(keywords) > 1 and multi_word_literal:
             # Try to match literal multi-word phrases first
             if len(keywords) == 2:
@@ -290,6 +295,8 @@ class Searchable(object):
                     if keyword_not_stop_word[pos] and keyword_not_stop_word[pos+2]:
                         search_phrases.append(' '.join(keywords[pos:pos+3]))
             query = klass.all(keys_only=True)
+            if cursor:
+                query = query.with_cursor(cursor)
             for phrase in search_phrases:
                 if stemming:
                     phrase = stemmer.stemWord(phrase)
@@ -297,6 +304,7 @@ class Searchable(object):
             if kind:
                 query = query.filter('parent_kind =', kind)
             index_keys = query.fetch(limit=limit)
+            new_cursor = query.cursor()
 
         if len(index_keys) < limit:
             new_limit = limit - len(index_keys)
@@ -304,6 +312,8 @@ class Searchable(object):
             if stemming:
                 keywords = stemmer.stemWords(keywords)
             query = klass.all(keys_only=True)
+            if cursor:
+                query = query.with_cursor(cursor)
             for keyword in keywords:
                 query = query.filter('phrases =', keyword)
             if kind:
@@ -311,8 +321,9 @@ class Searchable(object):
             single_word_matches = [key for key in query.fetch(limit=new_limit) \
                                    if key not in index_keys]
             index_keys.extend(single_word_matches)
+            new_cursor = query.cursor()
 
-        return [(key.parent(), SearchIndex.get_title(key.name())) for key in index_keys]
+        return [(key.parent(), SearchIndex.get_title(key.name())) for key in index_keys], new_cursor
 
     @classmethod
     def get_simple_search_phraseset(cls, text):
@@ -398,7 +409,7 @@ class Searchable(object):
         return phrases
 
     @classmethod
-    def search(cls, phrase, limit=10, keys_only=False):
+    def search(cls, phrase, limit=10, keys_only=False, cursor=None):
         """Queries search indices for phrases using a merge-join.
         
         Use of this class method lets you easily restrict searches to a kind
@@ -413,15 +424,16 @@ class Searchable(object):
             A list.  If keys_only is True, the list holds (key, title) tuples.
             If keys_only is False, the list holds Model instances.
         """
-        key_list = Searchable.full_text_search(
+        key_list, new_cursor = Searchable.full_text_search(
                         phrase, limit=limit, kind=cls.kind(),
                         stemming=cls.INDEX_STEMMING, 
-                        multi_word_literal=cls.INDEX_MULTI_WORD)
+                        multi_word_literal=cls.INDEX_MULTI_WORD,
+                        cursor=cursor)
         if keys_only:
             logging.debug("key_list: %s", key_list)
-            return key_list
+            return key_list, new_cursor
         else:
-            return [cls.get(key_and_title[0]) for key_and_title in key_list]
+            return [cls.get(key_and_title[0]) for key_and_title in key_list], new_cursor
 
     def indexed_title_changed(self):
         """Renames index entities for this model to match new title."""
