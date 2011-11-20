@@ -50,24 +50,27 @@ computerized algorithms implementing text processing!
 from google.appengine.ext import db
 import search
 
-from google.appengine.api import apiproxy_stub_map
-from google.appengine.api import datastore_file_stub
+from google.appengine.ext import testbed
 
-def clear_datastore():
-    """Clear datastore.  Can be used between tests to insure empty datastore.
-    
-    See code.google.com/p/nose-gae/issues/detail?id=16
-    Note: the appid passed to DatastoreFileStub should match the app id in your app.yaml.
+def clear_datastore(self):
+    """Using testbed to start gae test instance and initialize needed services.
+
+    Details:
+    http://code.google.com/appengine/docs/python/tools/localunittesting.html
     """
-    apiproxy_stub_map.apiproxy = apiproxy_stub_map.APIProxyStubMap()
-    stub = datastore_file_stub.DatastoreFileStub('billkatz-test', '/dev/null', '/dev/null')
-    apiproxy_stub_map.apiproxy.RegisterStub('datastore_v3', stub)
+    self.tbed = testbed.Testbed()
+    self.tbed.activate()
+    self.tbed.init_datastore_v3_stub()
+    self.tbed.init_memcache_stub()
+    self.tbed.init_taskqueue_stub()
+
 
 class Page(search.Searchable, db.Model):
     author_name = db.StringProperty()
     title = db.StringProperty()
     content = db.TextProperty()
     INDEX_TITLE_FROM_PROP = 'title'
+
 
 class NoninflectedPage(search.Searchable, db.Model):
     """Used to test search without stemming, e.g. for precise, non-inflected words"""
@@ -76,9 +79,13 @@ class NoninflectedPage(search.Searchable, db.Model):
     INDEX_STEMMING = False
     INDEX_ONLY = ['content']
 
+
 class TestMisc:
     def setup(self):
-        clear_datastore()
+        clear_datastore(self)
+
+    def teardown(self):
+        self.tbed.deactivate()
 
     def test_appostrophed_key(self):
         page = Page(key_name="Show Don't Tell", author_name="Pro Author",
@@ -86,9 +93,10 @@ class TestMisc:
         key = page.put()
         assert str(key.name()) == "Show Don't Tell"
 
+
 class TestLoremIpsum:
     def setup(self):
-        clear_datastore()
+        clear_datastore(self)
         page = NoninflectedPage(author_name='John Doe', content=LOREM_IPSUM)
         page.put()
         page.index()
@@ -100,7 +108,7 @@ class TestLoremIpsum:
         assert search.LiteralIndex.all().count() == 2
 
     def teardown(self):
-        pass
+        self.tbed.deactivate()
 
     def test_only_index(self):
         returned_pages, cursor = NoninflectedPage.search('John')  # Only 'content' is indexed.
@@ -136,9 +144,10 @@ class TestLoremIpsum:
         returned_pages, cursor = NoninflectedPage.search('encrusted')
         assert returned_pages
 
+
 class TestInflection:
     def setup(self):
-        clear_datastore()
+        clear_datastore(self)
         page = Page(author_name='John Doe', content=INFLECTION_TEST)
         page.put()
         page.index()
@@ -147,6 +156,9 @@ class TestInflection:
         page.put()
         page.index()
         assert search.StemmedIndex.all().count() == 2
+
+    def teardown(self):
+        self.tbed.deactivate()
 
     def test_inflections(self):
         def check_inflection(word1, word2):
@@ -158,9 +170,13 @@ class TestInflection:
         check_inflection('rubies', 'ruby')
         check_inflection('encrust', 'encrusted')
 
+
 class TestBigIndex:
     def setup(self):
-        clear_datastore()
+        clear_datastore(self)
+
+    def teardown(self):
+        self.tbed.deactivate()
 
     def test_multientity_index(self):
         curdir = os.path.abspath(os.path.dirname(__file__))
@@ -180,9 +196,10 @@ class TestBigIndex:
         page.index()
         assert search.StemmedIndex.all().count() == 1
 
+
 class TestKeyOnlySearch:
     def setup(self):
-        clear_datastore()
+        clear_datastore(self)
         self.pages = [{
             'key_name': 'test1',
             'content': 'This post has no title at all.'
@@ -200,6 +217,9 @@ class TestKeyOnlySearch:
             page.put()
             page.index()
         assert search.StemmedIndex.all().count() == 3
+
+    def teardown(self):
+        self.tbed.deactivate()
 
     def test_default_titling(self):
         page_list, cursor = Page.search('no title', keys_only=True)
@@ -226,9 +246,10 @@ class TestKeyOnlySearch:
         assert page_list[0][1] == 'My Great New Title'
         assert page_list[0][0].id_or_name() == old_key.id_or_name()
 
+
 class TestMultiWordSearch:
     def setup(self):
-        clear_datastore()
+        clear_datastore(self)
         page = Page(key_name='doetext', author_name='John Doe', 
                     content=INFLECTION_TEST)
         page.put()
@@ -252,6 +273,9 @@ class TestMultiWordSearch:
         page.put()
         page.index()
         assert search.StemmedIndex.all().count() == 3
+
+    def teardown(self):
+        self.tbed.deactivate()
 
     def test_multiword_search_order(self):
         returned_pages, cursor = Page.search('statue of liberty')
@@ -277,7 +301,7 @@ class TestMultiWordSearch:
 
 class TestCursor:
     def setup(self):
-        clear_datastore()
+        clear_datastore(self)
         content1 = 'Bread cumbs are delicious!'
         content2 = 'Bread cumbs are abomination!'
         pages = [NoninflectedPage(author='John Doe', title='Yummy', content=content1) for i in range(15)]
@@ -286,8 +310,14 @@ class TestCursor:
         for page in pages:
             page.index()
         assert search.LiteralIndex.all().count() == 25
+
+    def teardown(self):
+        self.tbed.deactivate()
+
     def test_cursor(self):
         returned_pages, cursor = NoninflectedPage.search('delicious', limit=10)
         assert len(returned_pages) == 10
         returned_pages, cursor = NoninflectedPage.search('delicious', limit=10, cursor=cursor)
         assert len(returned_pages) == 5
+
+
