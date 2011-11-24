@@ -42,11 +42,10 @@ import sys
 
 from google.appengine.api import datastore
 from google.appengine.api import datastore_types
+from google.appengine.api import taskqueue
 from google.appengine.ext import db
+from google.appengine.ext import deferred
 from google.appengine.ext import webapp
-
-# TODO -- This will eventually be moved out of labs namespace
-from google.appengine.api.labs import taskqueue
 
 # Use python port of Porter2 stemmer.
 from search.pyporter2 import Stemmer
@@ -548,6 +547,11 @@ class Searchable(object):
             if only_index:
                 params['only_index'] = ' '.join(only_index)
             taskqueue.add(url=url, params=params)
+
+    def defer_indexing(self):
+        """Add indexing task to the default task queue using deferred library.
+        """
+        deferred.defer(self.index)
 
 class SearchIndexing(webapp.RequestHandler):
     """Handler for full text indexing task."""

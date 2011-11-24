@@ -48,6 +48,7 @@ computerized algorithms implementing text processing!
 """
 
 from google.appengine.ext import db
+from google.appengine.api import taskqueue
 import search
 
 from google.appengine.ext import testbed
@@ -59,9 +60,9 @@ def clear_datastore(self):
     http://code.google.com/appengine/docs/python/tools/localunittesting.html
     """
     self.tbed = testbed.Testbed()
+    self.tbed.setup_env(app_id='billkatz-test')
     self.tbed.activate()
     self.tbed.init_datastore_v3_stub()
-    self.tbed.init_memcache_stub()
     self.tbed.init_taskqueue_stub()
 
 
@@ -320,4 +321,26 @@ class TestCursor:
         returned_pages, cursor = NoninflectedPage.search('delicious', limit=10, cursor=cursor)
         assert len(returned_pages) == 5
 
+class TestDefer:
+    def setup(self):
+        os.environ['HTTP_HOST'] = 'localhost'
+        clear_datastore(self)
+        content1 = 'Bread cumbs are delicious!'
+        self.pages = [NoninflectedPage(author='John Doe', title='Yummy', content=content1) for i in range(5)]
+        db.put(self.pages)
 
+        self.taskq = self.tbed.get_stub(testbed.TASKQUEUE_SERVICE_NAME)
+
+    def teardown(self):
+        self.tbed.deactivate()
+
+    def test_tasks_in_queue(self):
+        for page in self.pages:
+            page.defer_indexing()
+        assert len(self.taskq.GetTasks('default')) == 5
+
+    def test_deferred_indexing(self):
+        # TODO
+        pass
+
+    
